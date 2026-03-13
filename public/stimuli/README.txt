@@ -1,0 +1,1 @@
+Voice stimulus placeholder

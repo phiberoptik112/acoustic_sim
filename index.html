@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AcousticSim - Binaural Loudspeaker Simulator</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Main 3D Canvas -->
+    <div id="canvas-container">
+      <canvas id="scene-canvas"></canvas>
+
+      <!-- HUD Overlay -->
+      <div id="hud" id="hud-container">
+        <!-- LVT Configuration Display (hidden by default) -->
+        <div id="hud-config" class="hud-row hud-config-row hidden">
+          <span id="hud-config-indicator" class="hud-config-dot"></span>
+          <span id="hud-config-name" class="hud-value">Config</span>
+          <span id="hud-config-sensitivity" class="hud-note">(85 dB)</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-label">Azimuth:</span>
+          <span id="hud-azimuth" class="hud-value">0.0°</span>
+          <span class="hud-note">(on-axis)</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-label">Distance:</span>
+          <span id="hud-distance" class="hud-value">1.0 m</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-label">SPL est:</span>
+          <span id="hud-spl" class="hud-value">85.0 dB</span>
+        </div>
+        <div id="hud-warning" class="hud-warning hidden">
+          ⚠ Rear hemisphere — clamped to 90°
+        </div>
+      </div>
+
+      <!-- Drop Zone Overlay -->
+      <div id="drop-zone" class="hidden">
+        <div class="drop-zone-content">
+          <div class="drop-zone-icon">📁</div>
+          <div class="drop-zone-text">Drop FRD files here</div>
+          <div class="drop-zone-hint">or click to select files</div>
+        </div>
+        <input type="file" id="file-input" multiple accept=".frd,.txt">
+      </div>
+
+      <!-- Loading Overlay -->
+      <div id="loading-overlay" class="hidden">
+        <div class="loading-content">
+          <div class="loading-spinner"></div>
+          <div id="loading-text">Processing FRD files...</div>
+          <div id="loading-progress"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Panel (lil-gui will attach here) -->
+    <div id="right-panel"></div>
+
+    <!-- Bottom Chart Panel -->
+    <div id="bottom-panel">
+      <div class="chart-tabs">
+        <button class="chart-tab active" data-tab="fr">Frequency Response</button>
+        <button class="chart-tab" data-tab="spl">SPL vs Distance</button>
+      </div>
+      <div class="chart-container">
+        <canvas id="fr-chart"></canvas>
+        <canvas id="spl-chart" class="hidden"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

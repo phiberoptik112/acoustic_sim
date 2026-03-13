@@ -1,0 +1,32 @@
+{
+  "name": "acousticsim",
+  "version": "1.0.0",
+  "description": "Browser-based binaural loudspeaker simulator with real FRD measurement support",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "audio",
+    "binaural",
+    "loudspeaker",
+    "acoustics",
+    "frd",
+    "directivity",
+    "3d-audio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.128.0",
+    "resonance-audio": "^1.0.0",
+    "fft.js": "^4.0.4",
+    "lil-gui": "^0.19.2",
+    "chart.js": "^4.4.1"
+  },
+  "devDependencies": {
+    "vite": "^5.0.12"
+  }
+}
