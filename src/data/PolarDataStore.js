@@ -47,6 +47,13 @@ export class PolarDataStore {
    */
   setFRD(azimuthDeg, frdData) {
     this.frdCache.set(azimuthDeg, frdData);
+
+    // Keep loadedAzimuths in sync so getInterpolatedFRD can bracket correctly
+    // even when IR buffers are not stored in this instance (e.g. LVT mode).
+    if (!this.loadedAzimuths.includes(azimuthDeg)) {
+      this.loadedAzimuths.push(azimuthDeg);
+      this.loadedAzimuths.sort((a, b) => a - b);
+    }
   }
 
   /**
@@ -147,6 +154,13 @@ export class PolarDataStore {
    */
   get hasData() {
     return this.irCache.size > 0;
+  }
+
+  /**
+   * Check if FRD visualization data is loaded (independent of IR buffers)
+   */
+  get hasFRDData() {
+    return this.frdCache.size > 0;
   }
 
   /**

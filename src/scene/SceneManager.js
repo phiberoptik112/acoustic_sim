@@ -411,6 +411,11 @@ export class SceneManager {
     this.renderer.setSize(width, height, false);
   }
 
+  /** Call when layout changes without a window resize (e.g. chart panel drag). */
+  resize() {
+    this._onResize();
+  }
+
   /**
    * Set callback for frame updates
    */

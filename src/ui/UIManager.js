@@ -252,10 +252,17 @@ export class UIManager {
       appState.setLVTDemoMode(true);
 
       // Set up configuration switch handler
-      configurationManager.onSwitch((newConfigId, oldConfigId) => {
+      configurationManager.onSwitch((newConfigId) => {
         const config = configurationManager.getConfiguration(newConfigId);
         if (config) {
           this.audioEngine.crossfadeToConfiguration(config);
+
+          // Push the new config's FRD data into the global store so FRChart updates
+          polarDataStore.clear();
+          for (const [angle, frd] of config.frdSet) {
+            polarDataStore.setFRD(angle, frd);
+          }
+          appState.setFRDLoaded(true, [...config.frdSet.keys()].sort((a, b) => a - b));
         }
       });
 
@@ -263,7 +270,7 @@ export class UIManager {
       const firstConfigId = configs[0].id;
       configurationManager.switchTo(firstConfigId);
 
-      // Load first config into audio engine
+      // Load first config into audio engine (populates the active convolver)
       const firstConfig = configurationManager.getConfiguration(firstConfigId);
       this.audioEngine.loadConfiguration(firstConfig);
 
@@ -287,6 +294,10 @@ export class UIManager {
 
     // Switch back to single directivity model
     this.audioEngine.disableDualEngine();
+
+    // Clear LVT FRD data from global store so the chart resets cleanly
+    polarDataStore.clear();
+    appState.setFRDLoaded(false, []);
 
     // Disable LVT mode
     appState.setLVTDemoMode(false);

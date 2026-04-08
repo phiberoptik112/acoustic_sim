@@ -10,6 +10,7 @@ import { AudioEngine } from './audio/AudioEngine.js';
 import { UIManager } from './ui/UIManager.js';
 import { DropZone } from './ui/DropZone.js';
 import { FRChart } from './ui/FRChart.js';
+import { setupPanelSplitter } from './ui/PanelSplitter.js';
 import { getListenerAzimuth } from './utils/MathUtils.js';
 import { configurationManager } from './config/ConfigurationManager.js';
 
@@ -35,6 +36,7 @@ class AcousticSim {
 
     // Initialize scene
     this.sceneManager = new SceneManager(canvas);
+    setupPanelSplitter(this.sceneManager);
 
     // Initialize HUD
     this.hud = new HUD();
