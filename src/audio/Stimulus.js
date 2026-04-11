@@ -14,6 +14,7 @@ export class Stimulus {
 
     // Pre-generated buffers
     this.pinkNoiseBuffer = null;
+    this.whiteNoiseBuffer = null;
     this.logSweepBuffer = null;
     this.wavBuffer = null;
     this.voiceBuffer = null;
@@ -24,6 +25,7 @@ export class Stimulus {
 
     // Generate buffers
     this._generatePinkNoise();
+    this._generateWhiteNoise();
     this._generateLogSweep();
   }
 
@@ -43,8 +45,20 @@ export class Stimulus {
 
   /**
    * Set the stimulus type
+   * @param {string} type - 'pink', 'white', 'sweep', 'wav', 'voice'
+   * @returns {boolean} - True if type was changed successfully
    */
   setType(type) {
+    // Validate that the requested type has a buffer available
+    if (type === 'wav' && !this.wavBuffer) {
+      console.warn('Cannot switch to WAV: no file loaded. Staying on current stimulus.');
+      return false;
+    }
+    if (type === 'voice' && !this.voiceBuffer) {
+      console.warn('Cannot switch to voice: no voice file loaded. Staying on current stimulus.');
+      return false;
+    }
+
     const wasPlaying = this.isPlaying;
     if (wasPlaying) {
       this.stop();
@@ -53,6 +67,7 @@ export class Stimulus {
     if (wasPlaying) {
       this.start();
     }
+    return true;
   }
 
   /**
@@ -67,6 +82,9 @@ export class Stimulus {
     switch (this.currentType) {
       case 'pink':
         buffer = this.pinkNoiseBuffer;
+        break;
+      case 'white':
+        buffer = this.whiteNoiseBuffer;
         break;
       case 'sweep':
         buffer = this.logSweepBuffer;
@@ -191,6 +209,33 @@ export class Stimulus {
   }
 
   /**
+   * Generate white noise buffer (5 seconds)
+   * White noise has equal energy at all frequencies
+   */
+  _generateWhiteNoise() {
+    const sampleRate = this.audioContext.sampleRate;
+    const duration = 5; // seconds
+    const length = sampleRate * duration;
+    const buffer = this.audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+
+    // Generate white noise (uniform random distribution)
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.5; // Scale to prevent clipping
+    }
+
+    // Apply fade in/out to prevent clicks on loop
+    const fadeLength = Math.floor(sampleRate * 0.05);
+    for (let i = 0; i < fadeLength; i++) {
+      const fade = i / fadeLength;
+      data[i] *= fade;
+      data[length - 1 - i] *= fade;
+    }
+
+    this.whiteNoiseBuffer = buffer;
+  }
+
+  /**
    * Generate logarithmic sweep buffer (20Hz - 20kHz, 10 seconds)
    */
   _generateLogSweep() {
@@ -301,7 +346,7 @@ export class Stimulus {
    * Get available stimulus types
    */
   getAvailableTypes() {
-    const types = ['pink', 'sweep'];
+    const types = ['pink', 'white', 'sweep'];
     if (this.wavBuffer) {
       types.push('wav');
     }

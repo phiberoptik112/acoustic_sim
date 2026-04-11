@@ -296,6 +296,26 @@ export class DualDirectivityEngine {
   }
 
   /**
+   * Load IRs directly into the active model from a PolarDataStore
+   * Used when loading speaker presets while dual engine is active
+   * @param {PolarDataStore} polarDataStore - Data store containing IRs
+   */
+  loadIRsDirectly(polarDataStore) {
+    // Store reference and load into active model
+    if (this.activeModel === 'A') {
+      this.polarDataStoreA = polarDataStore;
+      this.directivityModelA.loadIRs(polarDataStore);
+      this.configIdA = 'preset'; // Mark as preset-loaded
+    } else {
+      this.polarDataStoreB = polarDataStore;
+      this.directivityModelB.loadIRs(polarDataStore);
+      this.configIdB = 'preset';
+    }
+
+    console.log(`DualDirectivityEngine: Loaded IRs directly into active model ${this.activeModel}`);
+  }
+
+  /**
    * Get current state for debugging
    * @returns {Object}
    */

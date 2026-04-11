@@ -101,3 +101,22 @@ export function applyTukeyWindow(signal, alpha = 0.15) {
   const window = tukey(signal.length, alpha);
   applyWindow(signal, window);
 }
+
+/**
+ * Tukey taper on the last portion of the buffer only (in-place).
+ * Use for truncated FIRs / IRs: symmetric Tukey zeros sample 0, which destroys
+ * front-loaded minimum-phase energy (e.g. flat magnitude → impulse at n=0).
+ * @param {Float32Array} signal - Signal to window
+ * @param {number} alpha - Taper ratio (same interpretation as {@link tukey})
+ */
+export function applyTukeyWindowEndOnly(signal, alpha = 0.15) {
+  const n = signal.length;
+  if (n === 0) return;
+  const taperLength = Math.max(1, Math.floor((alpha * n) / 2));
+  const start = n - taperLength;
+  const denom = Math.max(1, taperLength - 1);
+  for (let i = start; i < n; i++) {
+    const w = 0.5 * (1 + Math.cos((Math.PI * (i - start)) / denom));
+    signal[i] *= w;
+  }
+}

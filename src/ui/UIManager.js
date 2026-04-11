@@ -51,6 +51,7 @@ export class UIManager {
     // Stimulus type
     const stimulusOptions = {
       'Pink Noise': 'pink',
+      'White Noise': 'white',
       'Log Sweep': 'sweep',
       'WAV File': 'wav',
     };
@@ -58,7 +59,23 @@ export class UIManager {
       .add(appState, 'stimulusType', stimulusOptions)
       .name('Stimulus')
       .onChange((value) => {
-        appState.setStimulusType(value);
+        // Validate stimulus type change - revert if invalid
+        const success = this.audioEngine.stimulus?.setType(value);
+        if (success === false) {
+          // Revert to the actual current type on the stimulus engine.
+          // NOTE: appState.stimulusType has ALREADY been mutated to `value` by
+          // lil-gui before this onChange fired, so we cannot use it for reverting.
+          // stimulus.currentType still holds the previous valid type since setType
+          // returned false before touching currentType or stopping playback.
+          const actualCurrentType = this.audioEngine.stimulus?.currentType ?? 'pink';
+          appState.stimulusType = actualCurrentType;
+          // Use updateDisplay() (not setValue()) to avoid re-firing onChange
+          this.controllers.stimulus.updateDisplay();
+          this._showStimulusWarning(value);
+        } else {
+          // Update app state only if successful
+          appState.stimulusType = value;
+        }
       });
 
     // Master volume
@@ -80,10 +97,17 @@ export class UIManager {
           if (file) {
             try {
               await this.audioEngine.loadWavFile(file);
-              appState.setStimulusType('wav');
+              // Now that WAV is loaded, switch to it
+              appState.stimulusType = 'wav';
+              this.audioEngine.stimulus?.setType('wav');
+              this.controllers.stimulus.updateDisplay();
               console.log('WAV file loaded:', file.name);
+
+              // Show success toast
+              this._showSuccessToast(`Loaded: ${file.name}`);
             } catch (err) {
               console.error('Failed to load WAV:', err);
+              this._showStimulusWarning('wav');
             }
           }
         };
@@ -478,6 +502,109 @@ export class UIManager {
     } catch (err) {
       console.error(`Failed to load preset ${presetName}:`, err);
     }
+  }
+
+  /**
+   * Show a temporary success toast message
+   * @param {string} message - The message to display
+   * @private
+   */
+  _showSuccessToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'success-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #51cf66;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      font-size: 14px;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: fadeInOut 2s ease-in-out forwards;
+    `;
+
+    // Ensure animation styles exist
+    if (!document.getElementById('stimulus-warning-styles')) {
+      const style = document.createElement('style');
+      style.id = 'stimulus-warning-styles';
+      style.textContent = `
+        @keyframes fadeInOut {
+          0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+          15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.remove();
+    }, 2000);
+  }
+
+  /**
+   * Show a temporary warning message for stimulus selection
+   * @param {string} type - The stimulus type that failed
+   * @private
+   */
+  _showStimulusWarning(type) {
+    const messages = {
+      wav: 'Please load a WAV file first using the "Load WAV File" button',
+      voice: 'Voice stimulus not available',
+    };
+
+    const message = messages[type] || `Stimulus type "${type}" not available`;
+
+    // Create toast notification
+    const toast = document.createElement('div');
+    toast.className = 'stimulus-warning-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #ff6b6b;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      font-size: 14px;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: fadeInOut 3s ease-in-out forwards;
+    `;
+
+    // Add animation keyframes if not already present
+    if (!document.getElementById('stimulus-warning-styles')) {
+      const style = document.createElement('style');
+      style.id = 'stimulus-warning-styles';
+      style.textContent = `
+        @keyframes fadeInOut {
+          0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+          15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(toast);
+
+    // Remove after animation
+    setTimeout(() => {
+      toast.remove();
+    }, 3000);
   }
 
   /**

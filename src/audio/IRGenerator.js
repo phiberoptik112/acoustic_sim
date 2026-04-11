@@ -4,7 +4,7 @@
 
 import FFT from 'fft.js';
 import { interpolateLogFreq } from '../utils/MathUtils.js';
-import { applyTukeyWindow } from '../utils/WindowFunctions.js';
+import { applyTukeyWindowEndOnly } from '../utils/WindowFunctions.js';
 
 const DEFAULT_IR_SIZE = 2048;
 const DEFAULT_SAMPLE_RATE = 48000;
@@ -74,8 +74,8 @@ export function frdToIR(parsedFRD, options = {}) {
     ir[i] = irComplex[2 * i];
   }
 
-  // Step 6: Apply Tukey window to suppress edge artifacts
-  applyTukeyWindow(ir, 0.15);
+  // Step 6: Taper IR tail only (symmetric Tukey zeros n=0 and kills min-phase peaks)
+  applyTukeyWindowEndOnly(ir, 0.15);
 
   // Step 7: Normalize peak to prevent clipping
   let peak = 0;

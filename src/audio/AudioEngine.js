@@ -101,10 +101,17 @@ export class AudioEngine {
       }
     });
 
-    // Stimulus type
+    // Stimulus type - Note: validation now happens in UIManager before setting appState
+    // This subscription handles programmatic changes (e.g., from LVT mode)
     appState.subscribe('stimulusType', (type) => {
       if (this.stimulus) {
-        this.stimulus.setType(type);
+        // setType now returns false if the type isn't available
+        const success = this.stimulus.setType(type);
+        if (!success) {
+          // Revert to pink noise if the requested type isn't available
+          this.stimulus.setType('pink');
+          appState.stimulusType = 'pink';
+        }
       }
     });
 
@@ -204,10 +211,18 @@ export class AudioEngine {
 
   /**
    * Load FRD IRs into directivity model (for standard presets)
+   * Loads into both single and dual engines to ensure presets work in all modes
    */
   loadIRs(irCache) {
+    // Always load into single directivity model
     if (this.directivityModel) {
       this.directivityModel.loadIRs(irCache);
+    }
+
+    // If dual engine is active, also load into its active model
+    // This ensures speaker presets affect audio even in LVT mode
+    if (this.useDualEngine && this.dualDirectivityEngine) {
+      this.dualDirectivityEngine.loadIRsDirectly(irCache);
     }
   }
 
