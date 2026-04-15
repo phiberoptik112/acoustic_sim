@@ -8,6 +8,7 @@ import { Stimulus } from './Stimulus.js';
 import { DirectivityModel } from './DirectivityModel.js';
 import { DualDirectivityEngine } from './DualDirectivityEngine.js';
 import { HeadphoneEQ } from './HeadphoneEQ.js';
+import { SpeakerArrayProcessor } from './SpeakerArrayProcessor.js';
 import { parseFRD } from '../data/FRDParser.js';
 
 export class AudioEngine {
@@ -21,6 +22,7 @@ export class AudioEngine {
     this.dualDirectivityEngine = null; // DualDirectivityEngine for LVT configurations
     this.useDualEngine = false; // Toggle between single and dual mode
     this.headphoneEQ = null; // Output-stage headphone correction EQ
+    this.speakerArrayProcessor = null;
     this.isInitialized = false;
   }
 
@@ -68,19 +70,22 @@ export class AudioEngine {
 
       // Create directivity model (dual convolver) for standard presets
       this.directivityModel = new DirectivityModel(this.audioContext);
-      this.directivityModel.connect(this.resonanceSource.input);
 
       // Create dual directivity engine for LVT configurations
       this.dualDirectivityEngine = new DualDirectivityEngine(this.audioContext);
-      this.dualDirectivityEngine.connect(this.resonanceSource.input);
+
+      this.speakerArrayProcessor = new SpeakerArrayProcessor(
+        this.audioContext,
+        this.resonanceScene.createSource.bind(this.resonanceScene)
+      );
 
       // Create stimulus (sound sources)
       this.stimulus = new Stimulus(this.audioContext);
-      // Initially connect to single DirectivityModel
-      this.stimulus.connect(this.directivityModel.input);
 
       // Subscribe to state changes
       this._subscribeToState();
+
+      this._syncAudioGraph();
 
       this.isInitialized = true;
       console.log('AudioEngine initialized');
@@ -131,6 +136,17 @@ export class AudioEngine {
       if (this.resonanceSource) {
         this.resonanceSource.setRolloff(model);
       }
+      if (this.speakerArrayProcessor) {
+        this.speakerArrayProcessor.setRolloffModel(model);
+      }
+    });
+
+    appState.subscribe('arrayLayout', () => {
+      this._syncAudioGraph();
+    });
+
+    appState.subscribe('arrayElementDSP', () => {
+      this._applyArrayDSPFromState();
     });
 
     // Headphone calibration
@@ -153,6 +169,49 @@ export class AudioEngine {
 
   _dbToGain(db) {
     return Math.pow(10, db / 20);
+  }
+
+  /**
+   * Wire stimulus + directivity to either the single Resonance source, dual engine, or line array.
+   */
+  _syncAudioGraph() {
+    if (!this.stimulus || !this.directivityModel || !this.dualDirectivityEngine) {
+      return;
+    }
+
+    const useArray = appState.arrayElementCount > 1;
+
+    this.stimulus.disconnect();
+    this.directivityModel.disconnect();
+    this.dualDirectivityEngine.disconnect();
+
+    if (useArray) {
+      this.speakerArrayProcessor.setActiveChannelCount(appState.arrayElementCount);
+      this._applyArrayDSPFromState();
+      this.stimulus.connect(this.speakerArrayProcessor.input);
+      this.resonanceSource.setPosition(0, -1e6, 0);
+    } else {
+      this.speakerArrayProcessor.setActiveChannelCount(0);
+      this.speakerArrayProcessor.muteAllPositions();
+      if (this.useDualEngine) {
+        this.dualDirectivityEngine.connect(this.resonanceSource.input);
+        this.stimulus.connect(this.dualDirectivityEngine.input);
+      } else {
+        this.directivityModel.connect(this.resonanceSource.input);
+        this.stimulus.connect(this.directivityModel.input);
+      }
+    }
+  }
+
+  _applyArrayDSPFromState() {
+    if (!this.speakerArrayProcessor || appState.arrayElementCount <= 1) return;
+    const n = appState.arrayElementCount;
+    for (let i = 0; i < n; i++) {
+      const el = appState.arrayElements[i];
+      if (!el) continue;
+      this.speakerArrayProcessor.setElementDelaySec(i, el.delaySec);
+      this.speakerArrayProcessor.setElementShadingGainLinear(i, this._dbToGain(el.gainDb));
+    }
   }
 
   /**
@@ -193,19 +252,41 @@ export class AudioEngine {
    * Update source (speaker) position in Resonance
    */
   updateSourcePosition(x, y, z) {
+    if (appState.arrayElementCount > 1 && !this.useDualEngine) {
+      return;
+    }
     if (this.resonanceSource) {
       this.resonanceSource.setPosition(x, y, z);
     }
   }
 
   /**
-   * Update directivity based on current azimuth angle
+   * Update per-element Resonance source positions (line array mode).
+   * @param {{ x: number, y: number, z: number }[]} positionsWorld
+   */
+  updateArraySourcePositions(positionsWorld) {
+    if (!this.speakerArrayProcessor) return;
+    for (let i = 0; i < positionsWorld.length; i++) {
+      const p = positionsWorld[i];
+      this.speakerArrayProcessor.setSourcePosition(p.x, p.y, p.z);
+    }
+  }
+
+  /**
+   * Update directivity based on current azimuth angle(s)
+   * @param {number|number[]} azimuthDeg - single angle, or per-element angles in array mode
    */
   updateDirectivity(azimuthDeg) {
+    const useArray = appState.arrayElementCount > 1;
+    if (useArray && Array.isArray(azimuthDeg)) {
+      this.speakerArrayProcessor.updateDirectivity(azimuthDeg);
+      return;
+    }
+    const singleAz = Array.isArray(azimuthDeg) ? azimuthDeg[0] : azimuthDeg;
     if (this.useDualEngine && this.dualDirectivityEngine) {
-      this.dualDirectivityEngine.update(azimuthDeg);
+      this.dualDirectivityEngine.update(singleAz);
     } else if (this.directivityModel) {
-      this.directivityModel.update(azimuthDeg);
+      this.directivityModel.update(singleAz);
     }
   }
 
@@ -224,6 +305,10 @@ export class AudioEngine {
     if (this.useDualEngine && this.dualDirectivityEngine) {
       this.dualDirectivityEngine.loadIRsDirectly(irCache);
     }
+
+    if (this.speakerArrayProcessor) {
+      this.speakerArrayProcessor.loadIRs(irCache);
+    }
   }
 
   /**
@@ -231,11 +316,13 @@ export class AudioEngine {
    */
   enableDualEngine() {
     if (this.useDualEngine) return;
+    if (appState.arrayElementCount > 1) {
+      console.warn('AudioEngine: dual engine disabled while line array has multiple elements');
+      return;
+    }
 
-    // Disconnect stimulus from single model, connect to dual engine
-    this.stimulus.disconnect();
-    this.stimulus.connect(this.dualDirectivityEngine.input);
     this.useDualEngine = true;
+    this._syncAudioGraph();
 
     console.log('AudioEngine: Switched to dual directivity engine');
   }
@@ -246,10 +333,8 @@ export class AudioEngine {
   disableDualEngine() {
     if (!this.useDualEngine) return;
 
-    // Disconnect stimulus from dual engine, connect to single model
-    this.stimulus.disconnect();
-    this.stimulus.connect(this.directivityModel.input);
     this.useDualEngine = false;
+    this._syncAudioGraph();
 
     console.log('AudioEngine: Switched to single directivity model');
   }

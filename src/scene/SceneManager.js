@@ -7,6 +7,8 @@ import { appState } from '../state/AppState.js';
 import { SpeakerObject } from './SpeakerObject.js';
 import { ListenerObject } from './ListenerObject.js';
 import { LVTSceneOverlay } from './LVTSceneOverlay.js';
+import { DirectivityPlotOverlay } from './DirectivityPlotOverlay.js';
+import { polarDataStore } from '../data/PolarDataStore.js';
 
 export class SceneManager {
   constructor(canvas) {
@@ -18,6 +20,9 @@ export class SceneManager {
     this.activeCamera = null;
 
     this.speaker = null;
+    /** World anchor for the speaker system (line array centroid / enclosure reference) */
+    this.arrayRoot = null;
+    this.arrayElementMarkersGroup = null;
     this.listener = null;
 
     this.raycaster = new THREE.Raycaster();
@@ -27,6 +32,7 @@ export class SceneManager {
     this.dragOffset = new THREE.Vector3();
 
     this.polarFan = null;
+    this.directivityOverlay = null;
 
     // LVT Demo overlay
     this.lvtOverlay = null;
@@ -86,6 +92,19 @@ export class SceneManager {
       } else {
         this._clearPolarFan();
       }
+      this._refreshDirectivityOverlay();
+    });
+
+    appState.subscribe('directivityOverlayVisible', () => {
+      this._refreshDirectivityOverlay();
+    });
+
+    appState.subscribe('directivityFrequencies', () => {
+      this._refreshDirectivityOverlay();
+    });
+
+    appState.subscribe('arrayLayout', () => {
+      this._syncArrayElementMarkers();
     });
 
     // Subscribe to LVT Demo mode changes
@@ -173,9 +192,24 @@ export class SceneManager {
   }
 
   _createObjects() {
-    // Create speaker
+    this.arrayRoot = new THREE.Group();
+    this.arrayRoot.name = 'speakerArrayRoot';
+
+    this.arrayElementMarkersGroup = new THREE.Group();
+    this.arrayRoot.add(this.arrayElementMarkersGroup);
+
+    this._arrayMarkerGeometry = new THREE.SphereGeometry(0.055, 14, 14);
+    this._arrayMarkerMaterial = new THREE.MeshStandardMaterial({
+      color: 0x81c784,
+      emissive: 0x1b5e20,
+      emissiveIntensity: 0.35,
+    });
+
+    // Create speaker (cabinet mesh at array origin)
     this.speaker = new SpeakerObject();
-    this.scene.add(this.speaker.mesh);
+    this.arrayRoot.add(this.speaker.mesh);
+
+    this.scene.add(this.arrayRoot);
 
     // Create listener
     this.listener = new ListenerObject();
@@ -187,6 +221,11 @@ export class SceneManager {
     // Create empty polar fan (will be populated when FRD loads)
     this.polarFanGroup = new THREE.Group();
     this.scene.add(this.polarFanGroup);
+
+    // Directivity polar plot overlay (child of polarFanGroup for auto-positioning)
+    this.directivityOverlay = new DirectivityPlotOverlay();
+    this.directivityOverlay.setScale(this.polarFanRadius || 4);
+    this.polarFanGroup.add(this.directivityOverlay.mesh);
   }
 
   _updatePolarFan(angles) {
@@ -255,10 +294,27 @@ export class SceneManager {
   _clearPolarFan() {
     while (this.polarFanGroup.children.length > 0) {
       const child = this.polarFanGroup.children[0];
+      if (child === this.directivityOverlay?.mesh) {
+        this.polarFanGroup.remove(child);
+        continue;
+      }
       if (child.geometry) child.geometry.dispose();
       if (child.material) child.material.dispose();
       this.polarFanGroup.remove(child);
     }
+    // Re-add directivity overlay (it was removed from the group during clear)
+    if (this.directivityOverlay) {
+      this.polarFanGroup.add(this.directivityOverlay.mesh);
+    }
+  }
+
+  _refreshDirectivityOverlay() {
+    if (!this.directivityOverlay) return;
+    if (!appState.directivityOverlayVisible || !appState.frdLoaded) {
+      this.directivityOverlay.hide();
+      return;
+    }
+    this.directivityOverlay.update(polarDataStore, appState.directivityFrequencies);
   }
 
   _setupEventListeners() {
@@ -297,13 +353,14 @@ export class SceneManager {
       }
 
       if (objects.includes(obj)) {
-        this.dragObject = obj;
+        const dragTarget = obj === this.speaker.mesh ? this.arrayRoot : obj;
+        this.dragObject = dragTarget;
         this.canvas.style.cursor = 'grabbing';
 
         // Calculate offset from intersection point to object center
         const intersectPoint = new THREE.Vector3();
         this.raycaster.ray.intersectPlane(this.dragPlane, intersectPoint);
-        this.dragOffset.copy(obj.position).sub(intersectPoint);
+        this.dragOffset.copy(dragTarget.position).sub(intersectPoint);
       }
     }
   }
@@ -323,7 +380,7 @@ export class SceneManager {
       this.dragObject.position.z = newPosition.z;
 
       // Sync to state
-      if (this.dragObject === this.speaker.mesh) {
+      if (this.dragObject === this.arrayRoot) {
         appState.setSpeakerPosition(
           newPosition.x,
           this.dragObject.position.y,
@@ -435,12 +492,14 @@ export class SceneManager {
         this._onUpdate();
       }
 
-      // Update speaker rotation visual to match state
-      this.speaker.mesh.rotation.y = appState.speakerRotation;
+      // Rotate entire array about anchor (baffle / enclosure yaw)
+      this.arrayRoot.rotation.y = appState.speakerRotation;
 
-      // Update polar fan position to follow speaker
-      this.polarFanGroup.position.copy(this.speaker.mesh.position);
+      // Update polar fan position to follow array anchor
+      this.polarFanGroup.position.copy(this.arrayRoot.position);
       this.polarFanGroup.rotation.y = appState.speakerRotation;
+
+      this._syncArrayElementMarkers();
 
       // Render
       this.renderer.render(this.scene, this.activeCamera);
@@ -457,10 +516,35 @@ export class SceneManager {
   }
 
   /**
-   * Get speaker object for azimuth calculations
+   * Get speaker anchor object for azimuth calculations (array centroid)
    */
   getSpeakerObject() {
-    return this.speaker.mesh;
+    return this.arrayRoot;
+  }
+
+  _syncArrayElementMarkers() {
+    if (!this.arrayElementMarkersGroup) return;
+
+    const n = appState.arrayElementCount;
+    const offsets = appState.getElementLocalOffsets();
+
+    while (this.arrayElementMarkersGroup.children.length < n) {
+      const mesh = new THREE.Mesh(
+        this._arrayMarkerGeometry,
+        this._arrayMarkerMaterial
+      );
+      this.arrayElementMarkersGroup.add(mesh);
+    }
+
+    for (let i = 0; i < this.arrayElementMarkersGroup.children.length; i++) {
+      const mesh = this.arrayElementMarkersGroup.children[i];
+      const show = n > 1 && i < n;
+      mesh.visible = show;
+      if (show) {
+        const o = offsets[i];
+        mesh.position.set(o.x, 0.32, o.z);
+      }
+    }
   }
 
   /**
@@ -551,6 +635,11 @@ export class SceneManager {
     // Rebuild if we have angles loaded
     if (appState.loadedAngles && appState.loadedAngles.length > 0) {
       this._updatePolarFan(appState.loadedAngles);
+    }
+
+    // Rescale directivity overlay to match fan
+    if (this.directivityOverlay) {
+      this.directivityOverlay.setScale(radius);
     }
   }
 

@@ -159,14 +159,21 @@ export class DropZone {
       }
 
       // Update state
-      appState.setFRDLoaded(true, polarDataStore.getLoadedAngles());
+      const loadedAngles = polarDataStore.getLoadedAngles();
+      appState.setFRDLoaded(true, loadedAngles);
 
       // Load IRs into audio engine
       this.audioEngine.loadIRs(polarDataStore);
 
+      appState.setCustomMeasurement({
+        fileCount: angles.length,
+        angles,
+        source: 'drop',
+      });
+
       console.log(
         `Loaded ${polarDataStore.size} polar angles:`,
-        polarDataStore.getLoadedAngles()
+        loadedAngles
       );
 
       this._hideLoading();

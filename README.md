@@ -33,6 +33,17 @@ npm run build
 3. **Listen**: Hear how the speaker sounds from different positions and angles
 4. **Analyze**: View the interpolated frequency response at your current position
 
+## Line arrays
+
+Use the **Line array** panel to model **identical** drivers that share one polar FRD set:
+
+- **Elements** (1–16): each element is a separate Resonance Audio source on the line
+- **Spacing (m)**: center-to-center distance between neighbors
+- **Line axis**: along local **X** (left–right on the baffle) or **Z** (front–back)
+- **Per-element Delay (ms)** and **Gain (dB)**: electronic steering and shading (gain → linear trim before the convolver; delay via `DelayNode`, max 20 ms)
+
+The 3D anchor (draggable origin) stays the **array center**; green spheres mark element acoustic centers when **Elements** > 1. **LVT Demo** is disabled while multiple elements are active (enabling LVT collapses the array to one element). The FR chart’s white **Array @ listener** trace is an **incoherent power sum** of per-element magnitudes (phase and delay are not included in that curve; they are still audible in the binaural render).
+
 ## FRD File Format
 
 FRD (Frequency Response Data) files are tab or space-separated text files with three columns:
@@ -130,11 +141,11 @@ AudioBufferSourceNode (pink noise / sweep / WAV)
 AcousticSim intentionally does **not** model:
 
 - Room acoustics / reverberation
-- Multi-speaker array summation
+- Arrays of **mixed** drivers with different polar FRD sets per element (all elements share one measurement set today)
 - Personalized HRTFs
 - Ground-plane reflections
 
-It focuses purely on validating the direct sound from a single speaker's measured polar behavior.
+It focuses on validating **direct sound**: one polar FRD set per scene, optionally reproduced from multiple colocated sources in a line with per-channel delay and gain.
 
 ## License
 

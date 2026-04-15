@@ -11,7 +11,6 @@ import { UIManager } from './ui/UIManager.js';
 import { DropZone } from './ui/DropZone.js';
 import { FRChart } from './ui/FRChart.js';
 import { setupPanelSplitter } from './ui/PanelSplitter.js';
-import { getListenerAzimuth } from './utils/MathUtils.js';
 import { configurationManager } from './config/ConfigurationManager.js';
 
 class AcousticSim {
@@ -139,16 +138,18 @@ class AcousticSim {
         );
       }
 
-      // Update speaker position in Resonance
-      const speakerPos = speakerObj.position;
-      this.audioEngine.updateSourcePosition(
-        speakerPos.x,
-        speakerPos.y,
-        speakerPos.z
-      );
-
-      // Update directivity based on current azimuth
-      this.audioEngine.updateDirectivity(appState.getEffectiveAzimuth());
+      if (appState.arrayElementCount > 1) {
+        this.audioEngine.updateArraySourcePositions(appState.elementWorldPositions);
+        this.audioEngine.updateDirectivity(appState.getEffectiveElementAzimuths());
+      } else {
+        const speakerPos = speakerObj.position;
+        this.audioEngine.updateSourcePosition(
+          speakerPos.x,
+          speakerPos.y,
+          speakerPos.z
+        );
+        this.audioEngine.updateDirectivity(appState.getEffectiveAzimuth());
+      }
     }
 
     // Update chart with current position data

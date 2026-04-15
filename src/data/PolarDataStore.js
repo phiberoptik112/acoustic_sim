@@ -195,6 +195,41 @@ export class PolarDataStore {
 
     return { freqs, magDb };
   }
+
+  /**
+   * Incoherent power sum of pressure magnitudes at the listener (ignores phase / delay).
+   * @param {number[]} azimuthsDeg - effective polar angle per element (0–90°)
+   * @param {number[]} gainDbs - electronic shading per element (dB)
+   * @param {number[]} distancesM - source-to-listener distance per element (m)
+   * @returns {{ freqs: number[], magDb: number[] }|null}
+   */
+  getIncoherentPowerSumAtListener(azimuthsDeg, gainDbs, distancesM) {
+    if (!this.hasFRDData || !azimuthsDeg.length) {
+      return null;
+    }
+
+    const refFrd = this.getInterpolatedFRD(azimuthsDeg[0]);
+    if (!refFrd) return null;
+
+    const nBins = refFrd.freqs.length;
+    const magDbOut = new Array(nBins);
+
+    for (let fi = 0; fi < nBins; fi++) {
+      let pSum = 0;
+      for (let j = 0; j < azimuthsDeg.length; j++) {
+        const frd = this.getInterpolatedFRD(azimuthsDeg[j]);
+        if (!frd || frd.magDb[fi] === undefined) continue;
+        const g = gainDbs[j] ?? 0;
+        const d = Math.max(distancesM[j] ?? 1, 0.02);
+        const spl = frd.magDb[fi] + g - 20 * Math.log10(d);
+        const lin = Math.pow(10, spl / 20);
+        pSum += lin * lin;
+      }
+      magDbOut[fi] = 10 * Math.log10(Math.max(pSum, 1e-20));
+    }
+
+    return { freqs: refFrd.freqs, magDb: magDbOut };
+  }
 }
 
 // Export singleton instance

@@ -457,14 +457,49 @@ export class FRChart {
     // Primary: experienced response at listener position (angle + distance)
     let listenerMin = 110;
     if (interpolatedFRD) {
-      const listenerData = interpolatedFRD.freqs.map((freq, i) => {
-        const y = interpolatedFRD.magDb[i] - distAtten;
-        if (y < listenerMin) listenerMin = y;
-        return { x: freq, y };
-      });
+      let listenerData;
+      let primaryLabel;
+
+      if (appState.arrayElementCount > 1) {
+        const lx = appState.listenerPosition.x;
+        const ly = appState.listenerPosition.y;
+        const lz = appState.listenerPosition.z;
+        const dists = appState.elementWorldPositions.map((p) => {
+          const dx = lx - p.x;
+          const dy = ly - p.y;
+          const dz = lz - p.z;
+          return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        });
+        const effAz = appState.getEffectiveElementAzimuths();
+        const gains = appState.arrayElements
+          .slice(0, appState.arrayElementCount)
+          .map((e) => e.gainDb);
+        const combined = polarDataStore.getIncoherentPowerSumAtListener(
+          effAz,
+          gains,
+          dists
+        );
+        if (combined) {
+          listenerData = combined.freqs.map((freq, i) => {
+            const y = combined.magDb[i];
+            if (y < listenerMin) listenerMin = y;
+            return { x: freq, y };
+          });
+          primaryLabel = `Array @ listener (incoherent sum, ${appState.arrayElementCount} el)`;
+        }
+      }
+
+      if (!listenerData) {
+        listenerData = interpolatedFRD.freqs.map((freq, i) => {
+          const y = interpolatedFRD.magDb[i] - distAtten;
+          if (y < listenerMin) listenerMin = y;
+          return { x: freq, y };
+        });
+        primaryLabel = `At Listener (${this.currentDistance.toFixed(1)}m, ${absAzimuth.toFixed(1)}°)`;
+      }
 
       datasets.push({
-        label: `At Listener (${this.currentDistance.toFixed(1)}m, ${absAzimuth.toFixed(1)}°)`,
+        label: primaryLabel,
         data: listenerData,
         borderColor: '#ffffff',
         backgroundColor: 'rgba(255, 255, 255, 0.06)',
@@ -544,7 +579,10 @@ export class FRChart {
         tension: 0.4,
       },
       {
-        label: 'Current Position',
+        label:
+          appState.arrayElementCount > 1
+            ? 'Current (array center ref)'
+            : 'Current Position',
         data: [
           {
             x: this.currentDistance,

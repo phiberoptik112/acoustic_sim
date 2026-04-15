@@ -61,6 +61,8 @@ export class HUD {
     appState.subscribe('lvtDemoMode', (enabled) => {
       this._setConfigRowVisible(enabled);
     });
+
+    appState.subscribe('arrayLayout', () => this.refresh());
   }
 
   _updateConfigDisplay(configId) {
@@ -119,14 +121,20 @@ export class HUD {
       }
     }
 
+    const arrayHint = appState.arrayElementCount > 1;
+
     // Update distance
     if (this.distanceEl) {
-      this.distanceEl.textContent = `${distance.toFixed(2)} m`;
+      this.distanceEl.textContent = arrayHint
+        ? `${distance.toFixed(2)} m · array center`
+        : `${distance.toFixed(2)} m`;
     }
 
     // Update SPL estimate
     if (this.splEl) {
-      this.splEl.textContent = `${spl.toFixed(1)} dB`;
+      this.splEl.textContent = arrayHint
+        ? `${spl.toFixed(1)} dB · approx`
+        : `${spl.toFixed(1)} dB`;
     }
 
     // Update rear hemisphere warning

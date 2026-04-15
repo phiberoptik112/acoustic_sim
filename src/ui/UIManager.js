@@ -3,9 +3,10 @@
  */
 
 import GUI from 'lil-gui';
-import { appState } from '../state/AppState.js';
+import { appState, ARRAY_MAX_ELEMENTS } from '../state/AppState.js';
 import { generateSyntheticSpeaker } from '../presets/SyntheticSpeakers.js';
 import { frdToAudioBuffer } from '../audio/IRGenerator.js';
+import { parseMultipleFRD } from '../data/FRDParser.js';
 import { polarDataStore } from '../data/PolarDataStore.js';
 import { configurationManager } from '../config/ConfigurationManager.js';
 import { createAllLVTConfigurations } from '../presets/LVTSpeakers.js';
@@ -26,6 +27,8 @@ export class UIManager {
 
     this._createAudioControls();
     this._createViewControls();
+    this._createDirectivityControls();
+    this._createArrayControls();
     this._createPresetControls();
     this._createLVTDemoControls();
     this._createHeadphoneCalibrationControls();
@@ -151,15 +154,140 @@ export class UIManager {
     viewFolder.open();
   }
 
+  _createDirectivityControls() {
+    const folder = this.gui.addFolder('Directivity Plot');
+
+    const ALL_FREQS = [250, 500, 1000, 2000, 4000, 8000, 16000];
+    const defaultSet = new Set(appState.directivityFrequencies);
+
+    this.controllers.directivityVisible = folder
+      .add(appState, 'directivityOverlayVisible')
+      .name('Show Overlay')
+      .onChange((v) => {
+        appState.setDirectivityOverlayVisible(v);
+      });
+
+    const freqState = {};
+    const freqControllers = [];
+
+    for (const f of ALL_FREQS) {
+      const label = f >= 1000 ? `${f / 1000}k Hz` : `${f} Hz`;
+      const key = `f${f}`;
+      freqState[key] = defaultSet.has(f);
+
+      const ctrl = folder
+        .add(freqState, key)
+        .name(label)
+        .onChange(() => {
+          const selected = ALL_FREQS.filter((freq) => freqState[`f${freq}`]);
+          appState.setDirectivityFrequencies(selected);
+        });
+      freqControllers.push(ctrl);
+    }
+
+    appState.subscribe('directivityOverlayVisible', (v) => {
+      appState.directivityOverlayVisible = v;
+      this.controllers.directivityVisible.updateDisplay();
+    });
+
+    appState.subscribe('directivityFrequencies', (freqs) => {
+      const s = new Set(freqs);
+      for (const f of ALL_FREQS) {
+        freqState[`f${f}`] = s.has(f);
+      }
+      freqControllers.forEach((c) => c.updateDisplay());
+    });
+
+    folder.open();
+  }
+
+  _createArrayControls() {
+    const folder = this.gui.addFolder('Line array');
+
+    this.controllers.arrayCount = folder
+      .add(appState, 'arrayElementCount', 1, ARRAY_MAX_ELEMENTS, 1)
+      .name('Elements')
+      .onChange((v) => {
+        appState.setArrayElementCount(v);
+      });
+
+    this.controllers.arraySpacing = folder
+      .add(appState, 'arraySpacingMeters', 0, 2, 0.02)
+      .name('Spacing (m)')
+      .onChange((v) => {
+        appState.setArraySpacingMeters(v);
+      });
+
+    const axisOpts = {
+      'Along X (left-right)': 'x',
+      'Along Z (front-back)': 'z',
+    };
+    this.controllers.arrayAxis = folder
+      .add(appState, 'arrayLineAxis', axisOpts)
+      .name('Line axis')
+      .onChange((v) => {
+        appState.setArrayLineAxis(v);
+      });
+
+    const note = {
+      tip: 'Multi-element mode disables LVT Demo. All elements share the loaded FRD.',
+    };
+    folder.add(note, 'tip').name('Note').disable();
+
+    this._arrayElementFolders = [];
+    for (let i = 0; i < ARRAY_MAX_ELEMENTS; i++) {
+      const idx = i;
+      const ef = folder.addFolder(`Element ${i}`);
+      const delayProxy = {
+        get ms() {
+          return (appState.arrayElements[idx]?.delaySec ?? 0) * 1000;
+        },
+        set ms(v) {
+          appState.setArrayElementDelay(idx, v / 1000);
+        },
+      };
+      ef.add(delayProxy, 'ms', 0, 20, 0.05).name('Delay (ms)');
+      const gainProxy = {
+        get gainDb() {
+          return appState.arrayElements[idx]?.gainDb ?? 0;
+        },
+        set gainDb(v) {
+          appState.setArrayElementGainDb(idx, v);
+        },
+      };
+      ef.add(gainProxy, 'gainDb', -24, 12, 0.5).name('Gain (dB)');
+      this._arrayElementFolders.push(ef);
+    }
+
+    const syncArrayFolderVisibility = () => {
+      const n = appState.arrayElementCount;
+      this._arrayElementFolders.forEach((f, i) => {
+        f.domElement.style.display = i < n ? '' : 'none';
+      });
+      const multi = n > 1;
+      if (this.controllers.lvtMode) {
+        if (multi) {
+          this.controllers.lvtMode.disable();
+        } else {
+          this.controllers.lvtMode.enable();
+        }
+      }
+    };
+    syncArrayFolderVisibility();
+    appState.subscribe('arrayLayout', syncArrayFolderVisibility);
+
+    folder.open();
+  }
+
   _createPresetControls() {
     const presetFolder = this.gui.addFolder('Speaker Preset');
 
-    const presetState = {
+    this._presetState = {
       preset: 'none',
     };
 
     const presetOptions = {
-      'None (Upload FRD)': 'none',
+      'None': 'none',
       'Flat Response': 'flat',
       '2-Way Bookshelf': 'bookshelf',
       'Horn (Narrow HF)': 'horn',
@@ -167,21 +295,57 @@ export class UIManager {
     };
 
     this.controllers.preset = presetFolder
-      .add(presetState, 'preset', presetOptions)
+      .add(this._presetState, 'preset', presetOptions)
       .name('Preset')
       .onChange(async (value) => {
+        if (value === 'custom') return;
         if (value !== 'none') {
           await this._loadPreset(value);
         }
       });
 
-    // FRD upload hint
-    const uploadHint = {
-      info: 'Drag & drop FRD files onto the canvas to load custom speaker measurements',
+    // Upload measurement FRDs button
+    const uploadActions = {
+      uploadFRD: () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.frd,.txt';
+        input.onchange = async (e) => {
+          const files = Array.from(e.target.files);
+          if (files.length > 0) {
+            await this._loadCustomFRDFiles(files);
+          }
+        };
+        input.click();
+      },
     };
-    presetFolder.add(uploadHint, 'info').name('Tip').disable();
+    this.controllers.uploadFRD = presetFolder
+      .add(uploadActions, 'uploadFRD')
+      .name('Upload Measurement FRDs');
+
+    // Measurement status (hidden until custom data loaded)
+    this._measurementStatus = { info: '' };
+    this.controllers.measurementStatus = presetFolder
+      .add(this._measurementStatus, 'info')
+      .name('Loaded')
+      .disable();
+    this.controllers.measurementStatus.domElement.style.display = 'none';
+
+    // Help text about naming conventions
+    const namingHelp = {
+      info: 'Name FRD files with angle, e.g. speaker_030deg.frd or speaker_30.frd. Drag-drop onto canvas also works.',
+    };
+    presetFolder.add(namingHelp, 'info').name('Tip').disable();
 
     presetFolder.open();
+
+    // Sync preset dropdown when custom measurement loaded (e.g. via drag-drop)
+    appState.subscribe('customMeasurement', (info) => {
+      if (info) {
+        this._updatePresetDropdownForCustom(info);
+      }
+    });
   }
 
   _createLVTDemoControls() {
@@ -198,6 +362,9 @@ export class UIManager {
       .name('Enable LVT Demo')
       .onChange(async (enabled) => {
         if (enabled) {
+          if (appState.arrayElementCount > 1) {
+            appState.setArrayElementCount(1);
+          }
           await this._enableLVTDemo();
         } else {
           this._disableLVTDemo();
@@ -245,6 +412,19 @@ export class UIManager {
       if (configId) {
         lvtState.config = configId;
         this.controllers.lvtConfig.updateDisplay();
+      }
+    });
+
+    appState.subscribe('lvtExitForArray', () => {
+      configurationManager.clearConfigurations();
+      this.audioEngine.disableDualEngine();
+      appState.setActiveConfiguration(null);
+      lvtState.enabled = false;
+      if (this.controllers.lvtMode) {
+        this.controllers.lvtMode.updateDisplay();
+      }
+      if (this.controllers.lvtConfig) {
+        this.controllers.lvtConfig.disable();
       }
     });
   }
@@ -504,6 +684,76 @@ export class UIManager {
     }
   }
 
+  async _loadCustomFRDFiles(files) {
+    try {
+      const frdMap = await parseMultipleFRD(files);
+
+      if (frdMap.size === 0) {
+        this._showStimulusWarning('frd');
+        return;
+      }
+
+      polarDataStore.clear();
+
+      const audioContext = this.audioEngine.getAudioContext();
+      const angles = Array.from(frdMap.keys()).sort((a, b) => a - b);
+
+      for (const angle of angles) {
+        const frd = frdMap.get(angle);
+        polarDataStore.setFRD(angle, frd);
+
+        const audioBuffer = frdToAudioBuffer(frd, audioContext, {
+          irSize: appState.irSize,
+          useMinimumPhase: appState.useMinimumPhase,
+        });
+
+        polarDataStore.set(angle, 0, audioBuffer);
+      }
+
+      appState.setFRDLoaded(true, polarDataStore.getLoadedAngles());
+      this.audioEngine.loadIRs(polarDataStore);
+
+      const info = {
+        fileCount: frdMap.size,
+        angles,
+        source: 'upload',
+      };
+      appState.setCustomMeasurement(info);
+
+      this._showSuccessToast(
+        `Loaded ${frdMap.size} measurement${frdMap.size > 1 ? 's' : ''}: ${angles.map((a) => a + '\u00B0').join(', ')}`
+      );
+
+      console.log(`Custom measurement loaded: ${frdMap.size} files, angles: ${angles}`);
+    } catch (err) {
+      console.error('Failed to load custom FRD files:', err);
+      this._showStimulusWarning('frd');
+    }
+  }
+
+  _updatePresetDropdownForCustom(info) {
+    const dropdown = this.controllers.preset;
+    const domSelect = dropdown.domElement.querySelector('select');
+
+    if (domSelect) {
+      let customOption = domSelect.querySelector('option[value="custom"]');
+      if (!customOption) {
+        customOption = document.createElement('option');
+        customOption.value = 'custom';
+        domSelect.appendChild(customOption);
+      }
+      customOption.textContent = `Custom (${info.fileCount} angle${info.fileCount > 1 ? 's' : ''})`;
+    }
+
+    this._presetState.preset = 'custom';
+    dropdown.updateDisplay();
+
+    this._measurementStatus.info =
+      `${info.fileCount} angle${info.fileCount > 1 ? 's' : ''}: ${info.angles.map((a) => a + '\u00B0').join(', ')}`;
+    this.controllers.measurementStatus.updateDisplay();
+    this.controllers.measurementStatus.domElement.style.display = '';
+  }
+
   /**
    * Show a temporary success toast message
    * @param {string} message - The message to display
@@ -560,6 +810,7 @@ export class UIManager {
     const messages = {
       wav: 'Please load a WAV file first using the "Load WAV File" button',
       voice: 'Voice stimulus not available',
+      frd: 'No valid FRD files found. Ensure files contain frequency/magnitude data and filenames include the angle (e.g. speaker_030deg.frd).',
     };
 
     const message = messages[type] || `Stimulus type "${type}" not available`;
